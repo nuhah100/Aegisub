@@ -2,7 +2,9 @@ name: Meson CI
 
 on:
   push:
-    branches: [ master ]
+    branches:
+        - master
+        - avisynth_ci
   pull_request:
     branches: [ master ]
 
@@ -32,35 +34,7 @@ jobs:
               -Dfribidi:tests=false
               -Dfribidi:docs=false
               -Dlibass:fontconfig=disabled
-          #- {
-          #  name: Windows MinGW,
-          #  os: windows-latest,
-          #  msvc: false
-          #}
-          - {
-            name: Ubuntu Debug,
-            os: ubuntu-latest,
-            buildtype: debugoptimized,
-            args: ''
-          }
-          - {
-            name: Ubuntu Release,
-            os: ubuntu-latest,
-            buildtype: release,
-            args: ''
-          }
-          - {
-            name: macOS Debug,
-            os: macos-latest,
-            buildtype: debugoptimized,
-            args: -Ddefault_library=static -Dbuild_osx_bundle=true -Dlocal_boost=true
-          }
-          - {
-            name: macOS Release,
-            os: macos-latest,
-            buildtype: release,
-            args: -Ddefault_library=static -Dbuild_osx_bundle=true -Dlocal_boost=true
-          }
+              -Davisynth=enabled
 
     steps:
       - uses: actions/checkout@v2
