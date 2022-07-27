@@ -220,6 +220,12 @@ foreach dep: [
     endif
 endforeach
 
+if get_option('bestsource').enabled()
+    conf.set('WITH_BESTSOURCE', 1)
+    bs = subproject('bestsource')
+    deps += bs.get_variable('bestsource_dep')
+endif
+
 if host_machine.system() == 'windows' and get_option('avisynth').enabled()
     conf.set('WITH_AVISYNTH', 1) # bundled separately with installer
 endif
