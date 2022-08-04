@@ -20,6 +20,7 @@ deps = [
     jansson_dep,
     dependency('libavcodec', version: '>=58.18.0'),
     dependency('libavformat', version: '>=58.12.0'),
+    dependency('libavutil', version: '>=57.17.100'),
 ]
 
 bs_lib = static_library('bestsource', sources,
