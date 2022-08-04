@@ -23,6 +23,7 @@
 #include "include/aegisub/video_provider.h"
 
 #include "videosource.h"
+#include "BSRational.h"
 
 /* #include "options.h" */
 /* #include "utils.h" */
@@ -32,42 +33,63 @@ namespace agi { class BackgroundRunner; }
 #include <libaegisub/fs.h>
 #include <libaegisub/make_unique.h>
 
+#include <libaegisub/log.h>
+
 namespace {
 
 /// @class BSVideoProvider
 /// @brief Implements video loading through BestSource.
 class BSVideoProvider final : public VideoProvider {
-	/* BestVideoSource bs; */
+	std::map<std::string, std::string> bsopts;
+	BestVideoSource bs;
+	VideoProperties properties;
 
 public:
 	BSVideoProvider(agi::fs::path const& filename, std::string const& colormatrix, agi::BackgroundRunner *br);
 
-	void GetFrame(int n, VideoFrame &out) override { };
+	void GetFrame(int n, VideoFrame &out) override;
 
 	void SetColorSpace(std::string const& matrix) override { }
 
-	int GetFrameCount() const override { return 0; };
+	int GetFrameCount() const override { return properties.NumFrames; };
 
-	int GetWidth() const override { return 0; };
-	int GetHeight() const override { return 0; };
-	double GetDAR() const override { return 0; };
+	int GetWidth() const override { return properties.Width; };
+	int GetHeight() const override { return properties.Height; };
+	double GetDAR() const override { return (properties.Width * properties.SAR.Num) / (properties.Height * properties.SAR.Den); };
 
-	agi::vfr::Framerate GetFPS() const override { return agi::vfr::Framerate(std::vector<int>()); };
-	std::string GetColorSpace() const override { return ""; };
-	std::string GetRealColorSpace() const override { return ""; };
+	agi::vfr::Framerate GetFPS() const override { return agi::vfr::Framerate(properties.FPS.Num, properties.FPS.Den); }; // TODO figure out VFR with bs
+	std::string GetColorSpace() const override { return "TV.709"; }; 	// TODO
+	std::string GetRealColorSpace() const override { return "TV.709"; };
 	std::vector<int> GetKeyFrames() const override { return std::vector<int>(); };
-	std::string GetDecoderName() const override { return ""; };
+	std::string GetDecoderName() const override { return "BestSource"; };
 	bool WantsCaching() const override { return false; };
 	bool HasAudio() const override { return false; };
 };
 
 BSVideoProvider::BSVideoProvider(agi::fs::path const& filename, std::string const& colormatrix, agi::BackgroundRunner *br) try
+: bsopts()
+, bs(filename.string(), "", 0, false, 0, "", &bsopts)
 {
+	properties = bs.GetVideoProperties();
 
+	LOG_D("bs") << "Loaded!";
+	LOG_D("bs") << "Duration: " << GetFrameCount();
+	LOG_D("bs") << "Resolution: " << GetWidth() << "x" << GetHeight();
 }
 catch (agi::EnvironmentError const& err) {
 	throw VideoOpenError(err.GetMessage());
 }
+
+void BSVideoProvider::GetFrame(int n, VideoFrame &out) {
+	LOG_D("bs") << "Loading frame " << n;
+	BestVideoFrame *frame = bs.GetFrame(n);
+	out.width = GetWidth();
+	out.height = GetHeight();
+	out.flipped = false;
+	LOG_D("bs") << "Resolution: " << GetWidth() << "x" << GetHeight();
+	// Now to somehow go from *frame to &out...
+}
+
 }
 
 std::unique_ptr<VideoProvider> CreateBSVideoProvider(agi::fs::path const& path, std::string const& colormatrix, agi::BackgroundRunner *br) {
