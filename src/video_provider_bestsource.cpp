@@ -27,7 +27,7 @@
 
 /* #include "options.h" */
 /* #include "utils.h" */
-/* #include "video_frame.h" */
+#include "video_frame.h"
 namespace agi { class BackgroundRunner; }
 
 #include <libaegisub/fs.h>
