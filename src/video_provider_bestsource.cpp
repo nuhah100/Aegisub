@@ -27,12 +27,13 @@
 
 /* #include "options.h" */
 /* #include "utils.h" */
+#include "compat.h"
 #include "video_frame.h"
 namespace agi { class BackgroundRunner; }
 
 #include <libaegisub/fs.h>
 #include <libaegisub/make_unique.h>
-
+#include <libaegisub/background_runner.h>
 #include <libaegisub/log.h>
 
 namespace {
@@ -72,21 +73,83 @@ BSVideoProvider::BSVideoProvider(agi::fs::path const& filename, std::string cons
 {
 	properties = bs.GetVideoProperties();
 
+	if (properties.NumFrames == -1)
+	{
+	    LOG_D("bs") << "File not cached or varying samples, creating cache.";
+	    br->Run([&](agi::ProgressSink *ps) {
+	        ps->SetTitle(from_wx(_("Exacting")));
+	        ps->SetMessage(from_wx(_("Creating cache... This can take a while!")));
+	        ps->SetIndeterminate();
+	        if (bs.GetExactDuration())
+	        {
+	            LOG_D("bs") << "File cached and has exact samples.";
+	        }
+	    });
+	    properties = bs.GetVideoProperties();
+	}
+
 	LOG_D("bs") << "Loaded!";
-	LOG_D("bs") << "Duration: " << GetFrameCount();
-	LOG_D("bs") << "Resolution: " << GetWidth() << "x" << GetHeight();
+	LOG_D("bs") << "Duration: " << properties.Duration;
+	LOG_D("bs") << "FrameCount: " << properties.NumFrames;
+	LOG_D("bs") << "PixFmt: " << properties.PixFmt;
+	LOG_D("bs") << "ColorFamily: " << properties.VF.ColorFamily;
+	LOG_D("bs") << "Bits: " << properties.VF.Bits;
 }
 catch (agi::EnvironmentError const& err) {
 	throw VideoOpenError(err.GetMessage());
 }
 
 void BSVideoProvider::GetFrame(int n, VideoFrame &out) {
-	LOG_D("bs") << "Loading frame " << n;
 	BestVideoFrame *frame = bs.GetFrame(n);
 	out.width = GetWidth();
 	out.height = GetHeight();
+	out.pitch = GetWidth() * 4;
 	out.flipped = false;
-	LOG_D("bs") << "Resolution: " << GetWidth() << "x" << GetHeight();
+
+	out.data.resize(out.width * out.height * 4);
+	unsigned char *dst = &out.data[0];
+
+	switch (properties.VF.ColorFamily)
+	{
+	case 0:
+	    throw VideoOpenError("Unknown Color Family.");
+	case 1:
+	    throw VideoOpenError("Greyscale not supported.");
+	case 2: // RGB
+	{
+		uint8_t *PlrPtrs[3] = {};
+		PlrPtrs[0] = new uint8_t[out.width * out.height];
+		PlrPtrs[1] = new uint8_t[out.width * out.height];
+		PlrPtrs[2] = new uint8_t[out.width * out.height];
+		ptrdiff_t PlrStride[3] = { (ptrdiff_t) out.width, (ptrdiff_t) out.width, (ptrdiff_t) out.width };
+
+		if (!frame->ExportAsPlanar(PlrPtrs, PlrStride)) {
+			throw VideoOpenError("Couldn't unpack frame!");
+		}
+
+		for (size_t py = 0; py < out.height; py++) {
+			for (size_t px = 0; px < out.width; px++) {
+				*dst++ = PlrPtrs[1][py * out.width + px];
+				*dst++ = PlrPtrs[0][py * out.width + px];
+				*dst++ = PlrPtrs[2][py * out.width + px];
+				*dst++ = 0;
+			}
+		}
+
+		break;
+	}
+	case 3: // yuv
+	{
+	    // however, it's not so easy for YUV!
+	    // I believe this needs yuv to rgb conversion, bestsource does not do that with p2p.
+	    // (I think you can steal that from yuv4mpeg video provider.)
+	    throw VideoOpenError("YUV not supported.");
+	    break;
+	}    
+	default:
+	    throw VideoOpenError("Unknown ColorFamily");
+	}
+
 	// Now to somehow go from *frame to &out...
 }
 
