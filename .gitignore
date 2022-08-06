@@ -32,7 +32,6 @@ subprojects/harfbuzz
 subprojects/icu
 subprojects/libass
 subprojects/libffi*
-subprojects/libvp2p
 subprojects/libpng-*
 subprojects/luajit
 subprojects/nasm-*

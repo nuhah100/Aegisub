@@ -1,7 +1,0 @@
-[wrap-git]
-url = https://github.com/sekrit-twc/libp2p
-revision = head
-patch_directory = libvp2p
-
-[provide]
-libvp2p = libvp2p_dep

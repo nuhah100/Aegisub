@@ -12,15 +12,11 @@ sources = [
     'src/BSRational.cpp',
 ]
 
-libp2p_dep = dependency('libvp2p')
-jansson_dep = dependency('jansson', version: '>= 2.7', required: true)
-
 deps = [
-    libp2p_dep,
-    jansson_dep,
-    dependency('libavcodec', version: '>=58.18.0'),
-    dependency('libavformat', version: '>=58.12.0'),
-    dependency('libavutil', version: '>=57.17.100'),
+    dependency('jansson', version: '>= 2.7', required: true),
+    dependency('libavcodec'),
+    dependency('libavformat'),
+    dependency('libavutil'),
 ]
 
 bs_lib = static_library('bestsource', sources,
@@ -29,3 +25,4 @@ bs_lib = static_library('bestsource', sources,
 )
 
 bestsource_dep = declare_dependency(link_with: bs_lib, include_directories: include_directories('src'))
+

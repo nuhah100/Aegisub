@@ -25,6 +25,12 @@
 #include "videosource.h"
 #include "BSRational.h"
 
+extern "C" {
+#include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
+#include <libswscale/swscale.h>
+}
+
 /* #include "options.h" */
 /* #include "utils.h" */
 #include "compat.h"
@@ -45,6 +51,9 @@ class BSVideoProvider final : public VideoProvider {
 	BestVideoSource bs;
 	VideoProperties properties;
 
+	std::vector<int> Keyframes;
+	agi::vfr::Framerate Timecodes;
+
 public:
 	BSVideoProvider(agi::fs::path const& filename, std::string const& colormatrix, agi::BackgroundRunner *br);
 
@@ -58,10 +67,10 @@ public:
 	int GetHeight() const override { return properties.Height; };
 	double GetDAR() const override { return (properties.Width * properties.SAR.Num) / (properties.Height * properties.SAR.Den); };
 
-	agi::vfr::Framerate GetFPS() const override { return agi::vfr::Framerate(properties.FPS.Num, properties.FPS.Den); }; // TODO figure out VFR with bs
+	agi::vfr::Framerate GetFPS() const override { return Timecodes; };
 	std::string GetColorSpace() const override { return "TV.709"; }; 	// TODO
 	std::string GetRealColorSpace() const override { return "TV.709"; };
-	std::vector<int> GetKeyFrames() const override { return std::vector<int>(); };
+	std::vector<int> GetKeyFrames() const override { return Keyframes; };
 	std::string GetDecoderName() const override { return "BestSource"; };
 	bool WantsCaching() const override { return false; };
 	bool HasAudio() const override { return false; };
@@ -69,24 +78,68 @@ public:
 
 BSVideoProvider::BSVideoProvider(agi::fs::path const& filename, std::string const& colormatrix, agi::BackgroundRunner *br) try
 : bsopts()
-, bs(filename.string(), "", 0, false, 0, "", &bsopts)
+, bs(filename.string(), "", -1, false, 0, "", &bsopts)
 {
 	properties = bs.GetVideoProperties();
 
-	if (properties.NumFrames == -1)
-	{
+	if (properties.NumFrames == -1) {
 	    LOG_D("bs") << "File not cached or varying samples, creating cache.";
 	    br->Run([&](agi::ProgressSink *ps) {
 	        ps->SetTitle(from_wx(_("Exacting")));
 	        ps->SetMessage(from_wx(_("Creating cache... This can take a while!")));
 	        ps->SetIndeterminate();
-	        if (bs.GetExactDuration())
-	        {
+	        if (bs.GetExactDuration()) {
 	            LOG_D("bs") << "File cached and has exact samples.";
 	        }
+
+			std::vector<int> TimecodesVector;
+			for (int n = 0; n < properties.NumFrames; n++) {
+				std::unique_ptr<BestVideoFrame> frame(bs.GetFrame(n));
+				if (frame == nullptr) {
+					throw VideoOpenError("Couldn't read frame!");
+				}
+				
+				if (frame->GetAVFrame()->key_frame) {
+					Keyframes.push_back(n);
+				}
+
+				TimecodesVector.push_back((int) frame->GetAVFrame()->pts);
+			}
+
+			if (TimecodesVector.size() < 2) {
+				Timecodes = 25.0;
+			} else {
+				Timecodes = agi::vfr::Framerate(TimecodesVector);
+			}
 	    });
 	    properties = bs.GetVideoProperties();
 	}
+
+	br->Run([&](agi::ProgressSink *ps) {
+		ps->SetTitle(from_wx(_("Scanning")));
+		ps->SetMessage(from_wx(_("Finding Keyframes and Timecodes...")));
+
+		std::vector<int> TimecodesVector;
+		for (int n = 0; n < properties.NumFrames; n++) {
+			std::unique_ptr<BestVideoFrame> frame(bs.GetFrame(n));
+			if (frame == nullptr) {
+				throw VideoOpenError("Couldn't read frame!");
+			}
+			
+			if (frame->GetAVFrame()->key_frame) {
+				Keyframes.push_back(n);
+			}
+
+			TimecodesVector.push_back((int) frame->GetAVFrame()->pts);
+			ps->SetProgress(n, properties.NumFrames);
+		}
+
+		if (TimecodesVector.size() < 2) {
+			Timecodes = 25.0;
+		} else {
+			Timecodes = agi::vfr::Framerate(TimecodesVector);
+		}
+	});
 
 	LOG_D("bs") << "Loaded!";
 	LOG_D("bs") << "Duration: " << properties.Duration;
@@ -100,57 +153,32 @@ catch (agi::EnvironmentError const& err) {
 }
 
 void BSVideoProvider::GetFrame(int n, VideoFrame &out) {
-	BestVideoFrame *frame = bs.GetFrame(n);
-	out.width = GetWidth();
-	out.height = GetHeight();
-	out.pitch = GetWidth() * 4;
-	out.flipped = false;
-
-	out.data.resize(out.width * out.height * 4);
-	unsigned char *dst = &out.data[0];
-
-	switch (properties.VF.ColorFamily)
-	{
-	case 0:
-	    throw VideoOpenError("Unknown Color Family.");
-	case 1:
-	    throw VideoOpenError("Greyscale not supported.");
-	case 2: // RGB
-	{
-		uint8_t *PlrPtrs[3] = {};
-		PlrPtrs[0] = new uint8_t[out.width * out.height];
-		PlrPtrs[1] = new uint8_t[out.width * out.height];
-		PlrPtrs[2] = new uint8_t[out.width * out.height];
-		ptrdiff_t PlrStride[3] = { (ptrdiff_t) out.width, (ptrdiff_t) out.width, (ptrdiff_t) out.width };
-
-		if (!frame->ExportAsPlanar(PlrPtrs, PlrStride)) {
-			throw VideoOpenError("Couldn't unpack frame!");
-		}
-
-		for (size_t py = 0; py < out.height; py++) {
-			for (size_t px = 0; px < out.width; px++) {
-				*dst++ = PlrPtrs[1][py * out.width + px];
-				*dst++ = PlrPtrs[0][py * out.width + px];
-				*dst++ = PlrPtrs[2][py * out.width + px];
-				*dst++ = 0;
-			}
-		}
-
-		break;
+	std::unique_ptr<BestVideoFrame> bsframe(bs.GetFrame(n));
+	if (bsframe == nullptr) {
+		throw VideoOpenError("Couldn't read frame!");
 	}
-	case 3: // yuv
-	{
-	    // however, it's not so easy for YUV!
-	    // I believe this needs yuv to rgb conversion, bestsource does not do that with p2p.
-	    // (I think you can steal that from yuv4mpeg video provider.)
-	    throw VideoOpenError("YUV not supported.");
-	    break;
-	}    
-	default:
-	    throw VideoOpenError("Unknown ColorFamily");
+	const AVFrame *frame = bsframe->GetAVFrame();
+	AVFrame *newframe = av_frame_alloc();
+
+	SwsContext *context = sws_getContext(
+			frame->width, frame->height, (AVPixelFormat) frame->format,  	// TODO figure out aegi's color space forcing.
+			frame->width, frame->height, AV_PIX_FMT_BGR0,
+			SWS_BICUBIC, nullptr, nullptr, nullptr);
+
+	if (context == nullptr) {
+		throw VideoOpenError("Couldn't convert frame!");
 	}
 
-	// Now to somehow go from *frame to &out...
+	sws_scale_frame(context, newframe, frame);
+
+	out.width = newframe->width;
+	out.height = newframe->height;
+	out.pitch = newframe->width * 4;
+	out.flipped = false; 		// TODO figure out flipped
+
+	out.data.assign(newframe->data[0], newframe->data[0] + newframe->linesize[0] * newframe->height);
+
+	av_frame_free(&newframe);
 }
 
 }
