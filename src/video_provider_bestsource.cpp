@@ -31,16 +31,20 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-/* #include "options.h" */
 /* #include "utils.h" */
+#include "options.h"
 #include "compat.h"
 #include "video_frame.h"
 namespace agi { class BackgroundRunner; }
 
 #include <libaegisub/fs.h>
+#include <libaegisub/path.h>
 #include <libaegisub/make_unique.h>
 #include <libaegisub/background_runner.h>
 #include <libaegisub/log.h>
+
+#include <boost/crc.hpp>
+#include <boost/filesystem/path.hpp>
 
 namespace {
 
@@ -54,6 +58,8 @@ class BSVideoProvider final : public VideoProvider {
 	std::vector<int> Keyframes;
 	agi::vfr::Framerate Timecodes;
 
+	std::string GetCacheFile(agi::fs::path const& filename);
+
 public:
 	BSVideoProvider(agi::fs::path const& filename, std::string const& colormatrix, agi::BackgroundRunner *br);
 
@@ -65,7 +71,7 @@ public:
 
 	int GetWidth() const override { return properties.Width; };
 	int GetHeight() const override { return properties.Height; };
-	double GetDAR() const override { return (properties.Width * properties.SAR.Num) / (properties.Height * properties.SAR.Den); };
+	double GetDAR() const override { return ((double) properties.Width * properties.SAR.Num) / (properties.Height * properties.SAR.Den); };
 
 	agi::vfr::Framerate GetFPS() const override { return Timecodes; };
 	std::string GetColorSpace() const override { return "TV.709"; }; 	// TODO
@@ -78,8 +84,9 @@ public:
 
 BSVideoProvider::BSVideoProvider(agi::fs::path const& filename, std::string const& colormatrix, agi::BackgroundRunner *br) try
 : bsopts()
-, bs(filename.string(), "", -1, false, 0, "", &bsopts)
+, bs(filename.string(), "", -1, false, 0, GetCacheFile(filename), &bsopts)
 {
+
 	properties = bs.GetVideoProperties();
 
 	if (properties.NumFrames == -1) {
@@ -134,22 +141,29 @@ BSVideoProvider::BSVideoProvider(agi::fs::path const& filename, std::string cons
 			ps->SetProgress(n, properties.NumFrames);
 		}
 
-		if (TimecodesVector.size() < 2) {
-			Timecodes = 25.0;
+		if (TimecodesVector.size() < 2 || TimecodesVector.front() == TimecodesVector.back()) {
+			Timecodes = (double) properties.FPS.Num / properties.FPS.Den;
 		} else {
 			Timecodes = agi::vfr::Framerate(TimecodesVector);
 		}
 	});
-
-	LOG_D("bs") << "Loaded!";
-	LOG_D("bs") << "Duration: " << properties.Duration;
-	LOG_D("bs") << "FrameCount: " << properties.NumFrames;
-	LOG_D("bs") << "PixFmt: " << properties.PixFmt;
-	LOG_D("bs") << "ColorFamily: " << properties.VF.ColorFamily;
-	LOG_D("bs") << "Bits: " << properties.VF.Bits;
 }
 catch (agi::EnvironmentError const& err) {
 	throw VideoOpenError(err.GetMessage());
+}
+
+std::string BSVideoProvider::GetCacheFile(agi::fs::path const& filename) {
+	// BS can store all its index data in a single file, but we make a separate index file
+	// for each video file to ensure that the old index is invalidated if the file is modified.
+	// While BS does check the filesize of the files, it doesn't check the modification time.
+	uintmax_t len = agi::fs::Size(filename);
+	boost::crc_32_type hash;
+	hash.process_bytes(filename.string().c_str(), filename.string().size());
+
+	auto result = config::path->Decode("?local/bsindex/" + filename.filename().string() + "_" + std::to_string(hash.checksum()) + "_" + std::to_string(len) + "_" + std::to_string(agi::fs::ModifiedTime(filename)) + ".json");
+	agi::fs::CreateDirectory(result.parent_path());
+
+	return result.string();
 }
 
 void BSVideoProvider::GetFrame(int n, VideoFrame &out) {
@@ -178,6 +192,7 @@ void BSVideoProvider::GetFrame(int n, VideoFrame &out) {
 
 	out.data.assign(newframe->data[0], newframe->data[0] + newframe->linesize[0] * newframe->height);
 
+	sws_freeContext(context);
 	av_frame_free(&newframe);
 }
 
