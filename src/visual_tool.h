@@ -156,6 +156,8 @@ public:
 	virtual void SetClientSize(int w, int h);
 	virtual void SetDisplayArea(int x, int y, int w, int h);
 	virtual void SetToolbar(wxToolBar *) { }
+	virtual void SetSubTool(int subtool) { }
+	virtual int GetSubTool() { return 0; }
 	virtual ~VisualToolBase() = default;
 };
 

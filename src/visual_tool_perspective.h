@@ -22,10 +22,23 @@
 #include "visual_feature.h"
 #include "visual_tool.h"
 
+class wxToolBar;
+
+/// Button IDs
+enum VisualToolPerspectiveSetting {
+	PERSP_PLANE = 1 << 0,
+	PERSP_GRID = 2 << 1,
+	PERSP_LAST = 2 << 2,
+};
+
 class VisualToolPerspective final : public VisualTool<VisualDraggableFeature> {
-	float angle_x = 0.f; /// Current x rotation
-	float angle_y = 0.f; /// Current y rotation
-	float angle_z = 0.f; /// Current z rotation
+	wxToolBar *toolBar = nullptr; /// The subtoolbar
+	int settings = 0; 
+
+	// All current transform coefficients. Used for drawing the grid.
+	float angle_x = 0.f;
+	float angle_y = 0.f;
+	float angle_z = 0.f;
 
 	float fax = 0.f;
 	float fay = 0.f;
@@ -41,21 +54,47 @@ class VisualToolPerspective final : public VisualTool<VisualDraggableFeature> {
 	Vector2D org;
 	Vector2D pos;
 
+    // Corner coordinates of the transform quad relative to the ambient quad.
+    Vector2D c1 = Vector2D(.25, .25);
+    Vector2D c2 = Vector2D(.75, .75);
+
 	Feature *orgf;
 	Vector2D old_orgf;
 
-	std::vector<Vector2D> old_positions;
-	std::vector<Feature *> quad_corners;
+	std::vector<Vector2D> old_inner;
+	std::vector<Vector2D> old_outer;
+
+	std::vector<Feature *> inner_corners;
+	std::vector<Feature *> outer_corners;
 
 	void Solve2x2Proper(float a11, float a12, float a21, float a22, float b1, float b2, float &x1, float &x2);
 	void Solve2x2(float a11, float a12, float a21, float a22, float b1, float b2, float &x1, float &x2);
+    void UnwrapQuadRel(std::vector<Vector2D> quad, float &x1, float &x2, float &x3, float &x4, float &y1, float &y2, float &y3, float &y4);
+    Vector2D XYToUV(std::vector<Vector2D> quad, Vector2D xy);
+    Vector2D UVToXY(std::vector<Vector2D> quad, Vector2D uv);
+
+	std::vector<Vector2D> FeaturePositions(std::vector<Feature *> features);
+    std::vector<Vector2D> MakeRect(Vector2D a, Vector2D b);
+    void UpdateInner();
+    void UpdateOuter();
+    void TextToPersp();
+    void InnerToText();
 
 	void DoRefresh() override;
 	void Draw() override;
 	void UpdateDrag(Feature *feature) override;
+    void MakeFeatures();
 	void SetFeaturePositions();
 	void ResetFeaturePositions();
 	void SaveFeaturePositions();
+
+	void AddTool(std::string command_name, VisualToolPerspectiveSetting mode);
+	bool HasOuter();
+
 public:
 	VisualToolPerspective(VideoDisplay *parent, agi::Context *context);
+
+	void SetToolbar(wxToolBar *tb) override;
+	void SetSubTool(int subtool) override;
+	int GetSubTool() override;
 };

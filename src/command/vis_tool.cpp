@@ -60,12 +60,31 @@ namespace {
 		}
 
 		bool IsActive(const agi::Context *c) override {
-			return c->videoDisplay->ToolIsVectorClipTool(M);
+			return c->videoDisplay->ToolIsType(typeid(VisualToolVectorClip)) && c->videoDisplay->GetSubTool() == M;
 		}
 
 		void operator()(agi::Context *c) override {
 			c->videoDisplay->SetTool(agi::make_unique<VisualToolVectorClip>(c->videoDisplay, c));
-			c->videoDisplay->SetVectorClipTool(M);
+			c->videoDisplay->SetSubTool(M);
+		}
+	};
+
+	template<VisualToolPerspectiveSetting M>
+	struct visual_tool_persp_setting : public Command {
+		CMD_TYPE(COMMAND_VALIDATE | COMMAND_TOGGLE)
+
+		bool Validate(const agi::Context *c) override {
+			return c->videoDisplay->ToolIsType(typeid(VisualToolPerspective));
+		}
+
+		bool IsActive(const agi::Context *c) override {
+			return Validate(c) && c->videoDisplay->GetSubTool() & M;
+		}
+
+		void operator()(agi::Context *c) override {
+			if (!c->videoDisplay->ToolIsType(typeid(VisualToolPerspective)))
+				c->videoDisplay->SetTool(agi::make_unique<VisualToolPerspective>(c->videoDisplay, c));
+			c->videoDisplay->SetSubTool(c->videoDisplay->GetSubTool() ^ M);
 		}
 	};
 
@@ -131,6 +150,23 @@ namespace {
 		STR_MENU("Vector Clip")
 		STR_DISP("Vector Clip")
 		STR_HELP("Clip subtitles to a vectorial area")
+	};
+
+	// Perspective settings
+	struct visual_mode_perspective_plane final : public visual_tool_persp_setting<PERSP_PLANE> {
+		CMD_NAME("video/tool/perspective/plane")
+		CMD_ICON(visual_clip)
+		STR_MENU("Show Surrounding Plane")
+		STR_DISP("Show Surrounding Plane")
+		STR_HELP("Toggles showing a second quad for the ambient 3D plane.")
+	};
+
+	struct visual_mode_perspective_grid final : public visual_tool_persp_setting<PERSP_GRID> {
+		CMD_NAME("video/tool/perspective/grid")
+		CMD_ICON(visual_rotatexy)
+		STR_MENU("Show Grid")
+		STR_DISP("Show Grid")
+		STR_HELP("Toggles showing a 3D grid in the visual perspective tool")
 	};
 
 	// Vector clip tools
@@ -204,6 +240,9 @@ namespace cmd {
 		reg(agi::make_unique<visual_mode_scale>());
 		reg(agi::make_unique<visual_mode_clip>());
 		reg(agi::make_unique<visual_mode_vector_clip>());
+
+		reg(agi::make_unique<visual_mode_perspective_plane>());
+		reg(agi::make_unique<visual_mode_perspective_grid>());
 
 		reg(agi::make_unique<visual_mode_vclip_drag>());
 		reg(agi::make_unique<visual_mode_vclip_line>());
