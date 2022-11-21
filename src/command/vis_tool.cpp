@@ -161,6 +161,19 @@ namespace {
 		STR_HELP("Toggles showing a second quad for the ambient 3D plane.")
 	};
 
+	// Perspective settings
+	struct visual_mode_perspective_lock_inner final : public visual_tool_persp_setting<PERSP_LOCK_OUTER> {
+		CMD_NAME("video/tool/perspective/lock_outer")
+		CMD_ICON(visual_scale)
+		STR_MENU("Lock Outer Quad")
+		STR_DISP("Lock Outer Quad")
+		STR_HELP("When the surrounding plane is also visible, switches which quad is locked. If inactive, the inner quad can only be resized without changing the perspective plane. If active, this holds for the outer quad instead.")
+
+		bool Validate(const agi::Context *c) override {
+			return c->videoDisplay->ToolIsType(typeid(VisualToolPerspective)) && c->videoDisplay->GetSubTool() | PERSP_PLANE;
+		}
+	};
+
 	struct visual_mode_perspective_grid final : public visual_tool_persp_setting<PERSP_GRID> {
 		CMD_NAME("video/tool/perspective/grid")
 		CMD_ICON(visual_rotatexy)
@@ -242,6 +255,7 @@ namespace cmd {
 		reg(agi::make_unique<visual_mode_vector_clip>());
 
 		reg(agi::make_unique<visual_mode_perspective_plane>());
+		reg(agi::make_unique<visual_mode_perspective_lock_inner>());
 		reg(agi::make_unique<visual_mode_perspective_grid>());
 
 		reg(agi::make_unique<visual_mode_vclip_drag>());

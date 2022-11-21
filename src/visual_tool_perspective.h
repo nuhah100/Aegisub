@@ -27,8 +27,9 @@ class wxToolBar;
 /// Button IDs
 enum VisualToolPerspectiveSetting {
 	PERSP_PLANE = 1 << 0,
-	PERSP_GRID = 2 << 1,
-	PERSP_LAST = 2 << 2,
+	PERSP_LOCK_OUTER = 2 << 1,
+	PERSP_GRID = 2 << 2,
+	PERSP_LAST = 2 << 3,
 };
 
 class VisualToolPerspective final : public VisualTool<VisualDraggableFeature> {
@@ -44,7 +45,6 @@ class VisualToolPerspective final : public VisualTool<VisualDraggableFeature> {
 	float fay = 0.f;
 
 	int align = 0;
-	float fax_shift_factor = 0.f;
 
 	double textwidth = 0.f;
 	double textheight = 0.f;
@@ -90,6 +90,7 @@ class VisualToolPerspective final : public VisualTool<VisualDraggableFeature> {
 
 	void AddTool(std::string command_name, VisualToolPerspectiveSetting mode);
 	bool HasOuter();
+	bool OuterLocked();
 
 public:
 	VisualToolPerspective(VideoDisplay *parent, agi::Context *context);

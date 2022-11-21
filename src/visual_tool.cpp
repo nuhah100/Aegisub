@@ -476,18 +476,6 @@ void VisualToolBase::GetLineScale(AssDialogue *diag, Vector2D &scale) {
 	scale = Vector2D(x, y);
 }
 
-float VisualToolBase::GetLineFontSize(AssDialogue *diag) {
-	float fs = 0.f;
-
-	if (AssStyle *style = c->ass->GetStyle(diag->Style))
-		fs = style->fontsize;
-	auto blocks = diag->ParseTags();
-	if (param_vec tag = find_tag(blocks, "\\fs"))
-		fs = tag->front().Get(fs);
-
-	return fs;
-}
-
 int VisualToolBase::GetLineAlignment(AssDialogue *diag) {
 	int an = 0;
 

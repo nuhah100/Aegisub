@@ -26,9 +26,13 @@
 #include "options.h"
 #include "selection_controller.h"
 #include "vector3d.h"
+#include "ass_file.h"
+#include "ass_dialogue.h"
 
 #include <libaegisub/format.h>
 #include <libaegisub/log.h>
+#include <libaegisub/split.h>
+#include <libaegisub/util.h>
 
 #include <cmath>
 #include <wx/colour.h>
@@ -37,6 +41,7 @@ static const float pi = 3.1415926536f;
 static const float deg2rad = pi / 180.f;
 static const float rad2deg = 180.f / pi;
 static const float screen_z = 312.5;
+static const char *ambient_plane_key = "perspective_ambient_plane";
 
 static const int BUTTON_ID_BASE = 1400;
 
@@ -76,7 +81,7 @@ Vector2D VisualToolPerspective::XYToUV(std::vector<Vector2D> quad, Vector2D xy) 
 	UnwrapQuadRel(quad, x1, x2, x3, x4, y1, y2, y3, y4);
 	float x = xy.X() - x1;
 	float y = xy.Y() - y1;
-	// Dumped from Mathematica 
+	// Dumped from Mathematica
 	float u = -(((x3*y2 - x2*y3)*(x4*y - x*y4)*(x4*(-y2 + y3) + x3*(y2 - y4) + x2*(-y3 + y4)))/(x3*x3*(x4*y2*y2*(-y + y4) + y4*(x*y2*(y2 - y4) + x2*(y - y2)*y4)) + x3*(x4*x4*y2*y2*(y - y3) + 2*x4*(x2*y*y3*(y2 - y4) + x*y2*(-y2 + y3)*y4) + x2*y4*(x2*(-y + y3)*y4 + 2*x*y2*(-y3 + y4))) + y3*(x*x4*x4*y2*(y2 - y3) + x2*x4*x4*(y2*y3 + y*(-2*y2 + y3)) - x2*x2*(x4*y*(y3 - 2*y4) + x4*y3*y4 + x*y4*(-y3 + y4)))));
 	float v = ((x2*y - x*y2)*(x4*y3 - x3*y4)*(x4*(y2 - y3) + x2*(y3 - y4) + x3*(-y2 + y4)))/(x3*(x4*x4*y2*y2*(-y + y3) + x2*y4*(2*x*y2*(y3 - y4) + x2*(y - y3)*y4) - 2*x4*(x2*y*y3*(y2 - y4) + x*y2*(-y2 + y3)*y4)) + x3*x3*(x4*y2*y2*(y - y4) + y4*(x2*(-y + y2)*y4 + x*y2*(-y2 + y4))) + y3*(x*x4*x4*y2*(-y2 + y3) + x2*x4*x4*(2*y*y2 - y*y3 - y2*y3) + x2*x2*(x4*y*(y3 - 2*y4) + x4*y3*y4 + x*y4*(-y3 + y4))));
 	return Vector2D(u, v);
@@ -87,7 +92,7 @@ Vector2D VisualToolPerspective::UVToXY(std::vector<Vector2D> quad, Vector2D uv) 
 	UnwrapQuadRel(quad, x1, x2, x3, x4, y1, y2, y3, y4);
 	float u = uv.X();
 	float v = uv.Y();
-    // Also dumped from Mathematica
+	// Also dumped from Mathematica
 	float d = (x4*((-1 + u + v)*y2 + y3 - v*y3) + x3*(y2 - u*y2 + (-1 + v)*y4) + x2*((-1 + u)*y3 - (-1 + u + v)*y4));
 	float x = (v*x4*(x3*y2 - x2*y3) + u*x2*(x4*y3 - x3*y4)) / d;
 	float y = (v*y4*(x3*y2 - x2*y3) + u*y2*(x4*y3 - x3*y4)) / d;
@@ -122,6 +127,7 @@ void VisualToolPerspective::SetToolbar(wxToolBar *toolBar) {
 	toolBar->AddSeparator();
 
 	AddTool("video/tool/perspective/plane", PERSP_PLANE);
+	AddTool("video/tool/perspective/lock_outer", PERSP_LOCK_OUTER);
 	AddTool("video/tool/perspective/grid", PERSP_GRID);
 
 	SetSubTool(0);
@@ -139,6 +145,8 @@ void VisualToolPerspective::SetSubTool(int subtool) {
 	for (int i = 1; i < PERSP_LAST; i <<= 1)
 		toolBar->ToggleTool(BUTTON_ID_BASE + i, i & subtool);
 
+	toolBar->EnableTool(BUTTON_ID_BASE + PERSP_LOCK_OUTER, subtool & PERSP_PLANE);
+
 	settings = subtool;
 	MakeFeatures();
 }
@@ -149,6 +157,10 @@ int VisualToolPerspective::GetSubTool() {
 
 bool VisualToolPerspective::HasOuter() {
 	return GetSubTool() & PERSP_PLANE;
+}
+
+bool VisualToolPerspective::OuterLocked() {
+	return GetSubTool() & PERSP_LOCK_OUTER;
 }
 
 std::vector<Vector2D> VisualToolPerspective::MakeRect(Vector2D a, Vector2D b) {
@@ -321,7 +333,6 @@ void VisualToolPerspective::UpdateDrag(Feature *feature) {
 	for (int i = 0; i < 4; i++) {
 		if (HasOuter() && feature == outer_corners[i]) {
 			changed_quad = outer_corners;
-			UpdateInner();
 		} else if (feature == inner_corners[i]) {
 			changed_quad = inner_corners;
 		}
@@ -340,12 +351,29 @@ void VisualToolPerspective::UpdateDrag(Feature *feature) {
 		}
 	}
 
-	for (int i = 0; i < 4; i++) {
-		if (HasOuter() && feature == inner_corners[i]) {
-			Vector2D newuv = XYToUV(FeaturePositions(outer_corners), feature->pos);
-			c1 = Vector2D(i == 0 || i == 3 ? newuv.X() : c1.X(), i < 2 ? newuv.Y() : c1.Y());
-			c2 = Vector2D(i == 0 || i == 3 ? c2.X() : newuv.X(), i < 2 ? c2.Y() : newuv.Y());
-			UpdateInner();
+	for (int i = 0; HasOuter() && i < 4; i++) {
+		if (feature == inner_corners[i]) {
+			if (!OuterLocked()) {
+				Vector2D newuv = XYToUV(FeaturePositions(outer_corners), feature->pos);
+				c1 = Vector2D(i == 0 || i == 3 ? newuv.X() : c1.X(), i < 2 ? newuv.Y() : c1.Y());
+				c2 = Vector2D(i == 0 || i == 3 ? c2.X() : newuv.X(), i < 2 ? c2.Y() : newuv.Y());
+				UpdateInner();
+			} else {
+				UpdateOuter();
+			}
+		} else if (feature == outer_corners[i]) {
+			if (OuterLocked()) {
+				Vector2D d1 = -c1 / (c2 - c1);
+				Vector2D d2 = (1 - c1) / (c2 - c1);
+				Vector2D newuv = XYToUV(FeaturePositions(inner_corners), feature->pos);
+				d1 = Vector2D(i == 0 || i == 3 ? newuv.X() : d1.X(), i < 2 ? newuv.Y() : d1.Y());
+				d2 = Vector2D(i == 0 || i == 3 ? d2.X() : newuv.X(), i < 2 ? d2.Y() : newuv.Y());
+				c1 = -d1 / (d2 - d1);
+				c2 = (1 - d1) / (d2 - d1);
+				UpdateOuter();
+			} else {
+				UpdateInner();
+			}
 		}
 	}
 
@@ -381,7 +409,6 @@ void VisualToolPerspective::InnerToText() {
 	float scalefactor = (z2 + z4) / 2;
 	Vector3D r1 = Vector3D(q1, screen_z) / scalefactor;
 	Vector3D r2 = z2 * Vector3D(q2, screen_z) / scalefactor;
-	Vector3D r3 = (z2 + z4 - 1) * Vector3D(q3, screen_z) / scalefactor;
 	Vector3D r4 = z4 * Vector3D(q4, screen_z) / scalefactor;
 
 	// Find the rotations
@@ -400,13 +427,17 @@ void VisualToolPerspective::InnerToText() {
 	float scaley = abs(ad.Y()) / textheight;
 
 	org = center;
-	pos = org - Vector2D(fax_shift_factor * rawfax * scaley, 0);
+	int shiftv = align <= 3 ? 1 : (align >= 7 ? -1 : 0);
+	int shifth = align % 3 == 0 ? 1 : (align % 3 == 1 ? -1 : 0);
+	pos = org - Vector2D(textheight / 2 * rawfax * scaley, 0) + Vector2D(shifth * textwidth, shiftv * textheight) / 2 * Vector2D(scalex, scaley);
 	angle_x = rotx * rad2deg;
 	angle_y = -roty * rad2deg;
 	angle_z = -rotz * rad2deg;
 	fsc = 100 * Vector2D(scalex, scaley);
 	fax = rawfax * scaley / scalex;
 	fay = 0;
+
+	uint32_t plane_extra = c->ass->AddExtradata(ambient_plane_key, agi::format("%.5f,%.5f,%.5f,%.5f", c1.X(), c1.Y(), c2.X(), c2.Y()));
 
 	for (auto line : c->selectionController->GetSelectedSet()) {
 		SetOverride(line, "\\fax", agi::format("%.6f", fax));
@@ -418,6 +449,15 @@ void VisualToolPerspective::InnerToText() {
 		SetOverride(line, "\\fry", agi::format("%.4f", angle_y));
 		SetOverride(line, "\\org", org.PStr());
 		SetOverride(line, "\\pos", pos.PStr());
+		// Let's reinvent the wheel a bit since extradata tooling is nonexistent
+		std::vector<uint32_t> extra = line->ExtradataIds.get();
+		std::vector<ExtradataEntry> entries = c->ass->GetExtradata(extra);
+		for (int i = entries.size() - 1; i >= 0; i--) {
+			if (entries[i].key == ambient_plane_key)
+				extra.erase(extra.begin() + i, extra.begin() + i + 1);
+		}
+		extra.push_back(plane_extra);
+		line->ExtradataIds = extra;
 	}
 }
 
@@ -453,6 +493,24 @@ void VisualToolPerspective::SetFeaturePositions() {
 void VisualToolPerspective::TextToPersp() {
 	if (!active_line) return;
 
+	for (auto const& extra : c->ass->GetExtradata(active_line->ExtradataIds)) {
+		if (extra.key == ambient_plane_key) {
+			std::vector<std::string> fields;
+			agi::Split(fields, extra.value, ',');
+			if (fields.size() != 4)
+				break;
+
+			double c1x, c1y, c2x, c2y;
+			if (!agi::util::try_parse(fields[0], &c1x)) break;
+			if (!agi::util::try_parse(fields[1], &c1y)) break;
+			if (!agi::util::try_parse(fields[2], &c2x)) break;
+			if (!agi::util::try_parse(fields[3], &c2y)) break;
+
+			c1 = Vector2D(c1x, c1y);
+			c2 = Vector2D(c2x, c2y);
+		}
+	}
+
 	org = GetLineOrigin(active_line);
 	pos = GetLinePosition(active_line);
 	if (!org)
@@ -462,24 +520,7 @@ void VisualToolPerspective::TextToPersp() {
 	GetLineShear(active_line, fax, fay);
 	GetLineScale(active_line, fsc);
 
-	float fs = GetLineFontSize(active_line);
 	align = GetLineAlignment(active_line);
-
-	switch (align) {
-		case 1:
-		case 2:
-		case 3:
-			fax_shift_factor = fs;
-			break;
-		case 4:
-		case 5:
-		case 6:
-			fax_shift_factor = fs / 2;
-			break;
-		default:
-			fax_shift_factor = 0.;
-			break;
-	}
 
 	double descend, extlead;
 	GetLineBaseExtents(active_line, textwidth, textheight, descend, extlead);
