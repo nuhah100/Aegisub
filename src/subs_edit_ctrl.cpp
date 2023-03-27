@@ -166,6 +166,8 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 		UpdateStyle();
 		SetFocus();
 	}, EDIT_MENU_REMOVE_FROM_DICT);
+
+	SetLayoutDirection (wxLayout_RightToLeft);
 }
 
 SubsTextEditCtrl::~SubsTextEditCtrl() {
@@ -193,7 +195,7 @@ void SubsTextEditCtrl::OnLoseFocus(wxFocusEvent &event) {
 
 void SubsTextEditCtrl::OnKeyDown(wxKeyEvent &event) {
 	event.Skip();
-
+	
 	// Workaround for wxSTC eating tabs.
 	if (event.GetKeyCode() == WXK_TAB)
 		Navigate(event.ShiftDown() ? wxNavigationKeyEvent::IsBackward : wxNavigationKeyEvent::IsForward);
